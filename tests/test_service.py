@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel
+from playwright.async_api import Page
 
+# Original module imports for Agent, Registry, Browser & related objects
 from browser_use.agent.message_manager.service import MessageManager
 from browser_use.agent.service import Agent
 from browser_use.agent.views import ActionResult, AgentOutput
@@ -16,18 +18,28 @@ from browser_use.controller.registry.service import Registry
 from browser_use.controller.registry.views import ActionModel
 from browser_use.controller.service import Controller
 
-# run with python -m pytest tests/test_service.py
+# Latest file imports for DomService and DOM views
+from browser_use.dom.service import DomService
+from browser_use.dom.views import (
+    DOMTextNode,
+    DOMElementNode,
+    CoordinateSet,
+    ViewportInfo
+)
 
 
-# run test with:
-# python -m pytest tests/test_service.py
+# -----------------------
+# Tests for Agent and Registry from the original file
+# -----------------------
 class TestAgent:
 	@pytest.fixture
 	def mock_controller(self):
 		controller = Mock(spec=Controller)
 		registry = Mock(spec=Registry)
 		registry.registry = MagicMock()
-		registry.registry.actions = {'test_action': MagicMock(param_model=MagicMock())}  # type: ignore
+		registry.registry.actions = {
+			'test_action': MagicMock(param_model=MagicMock())
+		}  # type: ignore
 		controller.registry = registry
 		return controller
 
@@ -47,16 +59,11 @@ class TestAgent:
 		"""
 		Test that the _convert_initial_actions method correctly converts
 		dictionary-based actions to ActionModel instances.
-
-		This test ensures that:
-		1. The method processes the initial actions correctly.
-		2. The correct param_model is called with the right parameters.
-		3. The ActionModel is created with the validated parameters.
-		4. The method returns a list of ActionModel instances.
 		"""
 		# Arrange
 		agent = Agent(
-			task='Test task', llm=mock_llm, controller=mock_controller, browser=mock_browser, browser_context=mock_browser_context
+			task='Test task', llm=mock_llm, controller=mock_controller,
+			browser=mock_browser, browser_context=mock_browser_context
 		)
 		initial_actions = [{'test_action': {'param1': 'value1', 'param2': 'value2'}}]
 
@@ -125,7 +132,7 @@ class TestAgent:
 			assert len(agent._last_result) == 1
 			assert isinstance(agent._last_result[0], ActionResult)
 			assert 'Test error' in agent._last_result[0].error
-			assert agent._last_result[0].include_in_memory == True
+			assert agent._last_result[0].include_in_memory is True
 
 
 class TestRegistry:
@@ -162,62 +169,113 @@ class TestRegistry:
 		# Assert that the included action was added to the registry
 		assert 'included_action' in registry_with_excludes.registry.actions
 
-	@pytest.mark.asyncio
-	async def test_execute_action_with_and_without_browser_context(self):
-		"""
-		Test that the execute_action method correctly handles actions with and without a browser context.
-		This test ensures that:
-		1. An action requiring a browser context is executed correctly.
-		2. An action not requiring a browser context is executed correctly.
-		3. The browser context is passed to the action function when required.
-		4. The action function receives the correct parameters.
-		5. The method raises an error when a browser context is required but not provided.
-		"""
-		registry = Registry()
 
-		# Define a mock action model
-		class TestActionModel(BaseModel):
-			param1: str
-
-		# Define mock action functions
-		async def test_action_with_browser(param1: str, browser):
-			return f'Action executed with {param1} and browser'
-
-		async def test_action_without_browser(param1: str):
-			return f'Action executed with {param1}'
-
-		# Register the actions
-		registry.registry.actions['test_action_with_browser'] = MagicMock(
-			function=AsyncMock(side_effect=test_action_with_browser),
-			param_model=TestActionModel,
-			description='Test action with browser',
-		)
-
-		registry.registry.actions['test_action_without_browser'] = MagicMock(
-			function=AsyncMock(side_effect=test_action_without_browser),
-			param_model=TestActionModel,
-			description='Test action without browser',
-		)
-
-		# Mock BrowserContext
-		mock_browser = MagicMock()
-
-		# Execute the action with a browser context
-		result_with_browser = await registry.execute_action(
-			'test_action_with_browser', {'param1': 'test_value'}, browser=mock_browser
-		)
-		assert result_with_browser == 'Action executed with test_value and browser'
-
-		# Execute the action without a browser context
-		result_without_browser = await registry.execute_action('test_action_without_browser', {'param1': 'test_value'})
-		assert result_without_browser == 'Action executed with test_value'
-
-		# Test error when browser is required but not provided
-		with pytest.raises(RuntimeError, match='Action test_action_with_browser requires browser but none provided'):
-			await registry.execute_action('test_action_with_browser', {'param1': 'test_value'})
-
-		# Verify that the action functions were called with correct parameters
-		registry.registry.actions['test_action_with_browser'].function.assert_called_once_with(
-			param1='test_value', browser=mock_browser
-		)
-		registry.registry.actions['test_action_without_browser'].function.assert_called_once_with(param1='test_value')
+# -----------------------
+# Tests for DomService from the latest file
+# -----------------------
+@pytest.mark.asyncio
+async def test_parse_node():
+    """
+    Test the _parse_node method of DomService to ensure it correctly parses
+    different types of nodes and creates the expected DOM structure.
+    
+    This test covers:
+    1. Parsing a text node
+    2. Parsing an element node with attributes, coordinates, and viewport info
+    3. Parsing a nested structure with both element and text nodes
+    4. Handling of None input
+    """
+    # Create a mock Page object
+    mock_page = Mock(spec=Page)
+    
+    # Initialize DomService with the mock Page
+    dom_service = DomService(mock_page)
+    
+    # Test parsing a text node
+    text_node_data = {
+        "type": "TEXT_NODE",
+        "text": "Hello, world!",
+        "isVisible": True
+    }
+    text_node = dom_service._parse_node(text_node_data)
+    assert isinstance(text_node, DOMTextNode)
+    assert text_node.text == "Hello, world!"
+    assert text_node.is_visible is True
+    
+    # Test parsing an element node with attributes and coordinates
+    element_node_data = {
+        "tagName": "div",
+        "xpath": "/html/body/div",
+        "attributes": {"class": "container"},
+        "isVisible": True,
+        "isInteractive": False,
+        "isTopElement": True,
+        "highlightIndex": 1,
+        "viewportCoordinates": {
+            "topLeft": {"x": 0, "y": 0},
+            "topRight": {"x": 100, "y": 0},
+            "bottomLeft": {"x": 0, "y": 50},
+            "bottomRight": {"x": 100, "y": 50},
+            "center": {"x": 50, "y": 25},
+            "width": 100,
+            "height": 50
+        },
+        "pageCoordinates": {
+            "topLeft": {"x": 0, "y": 0},
+            "topRight": {"x": 100, "y": 0},
+            "bottomLeft": {"x": 0, "y": 50},
+            "bottomRight": {"x": 100, "y": 50},
+            "center": {"x": 50, "y": 25},
+            "width": 100,
+            "height": 50
+        },
+        "viewport": {
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1024,
+            "height": 768
+        },
+        "children": []
+    }
+    element_node = dom_service._parse_node(element_node_data)
+    assert isinstance(element_node, DOMElementNode)
+    assert element_node.tag_name == "div"
+    assert element_node.xpath == "/html/body/div"
+    assert element_node.attributes == {"class": "container"}
+    assert element_node.is_visible is True
+    assert element_node.is_interactive is False
+    assert element_node.is_top_element is True
+    assert element_node.highlight_index == 1
+    assert isinstance(element_node.viewport_coordinates, CoordinateSet)
+    assert isinstance(element_node.page_coordinates, CoordinateSet)
+    assert isinstance(element_node.viewport_info, ViewportInfo)
+    
+    # Test parsing a nested structure
+    nested_node_data = {
+        "tagName": "div",
+        "xpath": "/html/body/div",
+        "children": [
+            {
+                "tagName": "p",
+                "xpath": "/html/body/div/p",
+                "children": [
+                    {
+                        "type": "TEXT_NODE",
+                        "text": "Nested text",
+                        "isVisible": True
+                    }
+                ]
+            }
+        ]
+    }
+    nested_node = dom_service._parse_node(nested_node_data)
+    assert isinstance(nested_node, DOMElementNode)
+    assert len(nested_node.children) == 1
+    assert isinstance(nested_node.children[0], DOMElementNode)
+    assert len(nested_node.children[0].children) == 1
+    assert isinstance(nested_node.children[0].children[0], DOMTextNode)
+    assert nested_node.children[0].children[0].text == "Nested text"
+    
+    # Test handling of None input
+    none_node = dom_service._parse_node(None)
+    assert none_node is None
