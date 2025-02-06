@@ -43,6 +43,7 @@ class DomService:
 	) -> DOMElementNode:
 		if await page.evaluate('1+1') != 2:
 			raise ValueError('The page cannot evaluate javascript code properly')
+
 		js_code = resources.read_text('browser_use.dom', 'buildDomTree.js')
 
 		args = {
