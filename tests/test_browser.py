@@ -194,10 +194,10 @@ async def test_chrome_instance_browser_launch_failure(monkeypatch):
     Test that when a Chrome instance cannot be started or connected to,
     the Browser._setup_browser_with_instance branch eventually raises a RuntimeError.
     We simulate failure by:
-      - Forcing requests.get to always raise a ConnectionError (so no existing instance is found).
-      - Monkeypatching subprocess.Popen to do nothing.
-      - Replacing asyncio.sleep to avoid delays.
-      - Having the dummy playwright's connect_over_cdp method always raise an Exception.
+        - Forcing requests.get to always raise a ConnectionError (so no existing instance is found).
+        - Monkeypatching subprocess.Popen to do nothing.
+        - Replacing asyncio.sleep to avoid delays.
+        - Having the dummy playwright's connect_over_cdp method always raise an Exception.
     """
     def dummy_get(url, timeout):
         raise requests.ConnectionError("Simulated connection failure")
@@ -304,3 +304,59 @@ async def test_standard_browser_launch_with_proxy(monkeypatch):
     result_browser = await browser_obj.get_playwright_browser()
     assert isinstance(result_browser, DummyBrowser), "Expected DummyBrowser from _setup_standard_browser with proxy provided"
     await browser_obj.close()
+@pytest.mark.asyncio
+async def test_close_force_keep_alive(monkeypatch):
+    """
+    Test that if _force_keep_browser_alive is True, the close method does not call
+    playwright_browser.close() or playwright.stop(), but still sets the internal attributes
+    to None.
+    """
+    # Create dummy browser and playwright that record if close/stop were called.
+    class DummyBrowser:
+        def __init__(self):
+            self.closed = False
+        async def close(self):
+            self.closed = True
+    class DummyPlaywright:
+        def __init__(self):
+            self.stopped = False
+        async def stop(self):
+            self.stopped = True
+    # Create config and force keep alive.
+    config = BrowserConfig()
+    config._force_keep_browser_alive = True
+    browser_obj = Browser(config=config)
+    dummy_browser = DummyBrowser()
+    dummy_playwright = DummyPlaywright()
+    browser_obj.playwright_browser = dummy_browser
+    browser_obj.playwright = dummy_playwright
+    # Call close(), which should not trigger DummyBrowser.close() or DummyPlaywright.stop()
+    await browser_obj.close()
+    # Even though close() does not call close/stop due to the flag, the attributes are cleared.
+    assert dummy_browser.closed is False, "Expected DummyBrowser.close() not to be called when _force_keep_browser_alive is True"
+    assert dummy_playwright.stopped is False, "Expected DummyPlaywright.stop() not to be called when _force_keep_browser_alive is True"
+    assert browser_obj.playwright_browser is None, "Expected playwright_browser to be None after close"
+    assert browser_obj.playwright is None, "Expected playwright to be None after close"
+@pytest.mark.asyncio
+async def test_del_cleanup_with_running_loop(monkeypatch):
+    """
+    Test that the __del__ method schedules an asynchronous close task via loop.create_task
+    when the asyncio event loop is running.
+    """
+    class DummyLoop:
+        def __init__(self):
+            self.task_created = False
+        def is_running(self):
+            return True
+        def create_task(self, coro):
+            self.task_created = True
+            return coro
+    dummy_loop = DummyLoop()
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: dummy_loop)
+    # Create a Browser instance with dummy playwright_browser and playwright to trigger __del__ logic
+    browser_obj = Browser()
+    browser_obj.playwright_browser = object()
+    browser_obj.playwright = object()
+    # Explicitly call __del__
+    browser_obj.__del__()
+    assert dummy_loop.task_created is True, "Expected __del__ to schedule a close task via create_task"
