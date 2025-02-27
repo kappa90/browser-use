@@ -1,4 +1,8 @@
 environment:
 - OPENAI_API_KEY=empty
 - AZURE_OPENAI_API_KEY=empty
+- GEMINI_API_KEY=empty
+- DEEPSEEK_API_KEY=empty
+- ANTHROPIC_API_KEY=empty
 from: pytest
+run_coverage: false
